@@ -1,160 +1,207 @@
+local component = require("component")
+local term = require("term")
+local event = require("event")
+local fs = require("filesystem")
 
--- Copyright (c) Totoro, ComputerCraft.ru
+local gpu = component.gpu
 
-local system = require("System")
-local GUI = require("GUI")
-local filesystem = require("Filesystem")
-local image = require("Image")
+local LOG_PATH = "chat_log.txt"
 
----------------------------------------------------------------------------------------------------------
+-- Конвертирует строку в массив
+function stringToArray(text)
+t = {}
+text:gsub(".",function© table.insert(t,c) end)
+return t
+end
 
-local hologram
+--Получить текущее реальное время компьютера, хостящего сервер майна
+function getHostTime(timezone)
+    timezone = timezone or 2
+local file = io.open("/HostTime.tmp", "w")
+file:write("")
+file:close()
+local timeCorrection = timezone * 3600
+local lastModified = tonumber(string.sub(fs.lastModified("/HostTime.tmp"), 1, -4)) + timeCorrection
+fs.remove("/HostTime.tmp")
+local year, month, day, hour, minute, second = os.date("%Y", lastModified), os.date("%m", lastModified), os.date("%d", lastModified), os.date("%H", lastModified), os.date("%M", lastModified), os.date("%S", lastModified)
+return tonumber(day), tonumber(month), tonumber(year), tonumber(hour), tonumber(minute), tonumber(second)
+end
 
--- создаем модель елки
-local tSpruce = {3, 2, 2, 2, 2, 8, 9, 10, 9, 8, 7, 6, 5, 4, 3, 4, 6, 8, 7, 6, 5, 4, 3, 6, 5, 4, 3, 2, 3, 2, 1}
--- создаем таблицу с падающими снежинками
-local tSnow = {}
+-- Получет настоящее время, стоящее на Хост-машине
+function real_time()
+local time = {getHostTime(3)}
+local text = string.format("%02d:%02d:%02d", time[4], time[5], time[6])
+return text
+end
 
-if not component.isAvailable("hologram") then
-	GUI.alert("This program requires Tier 2 holographic projector")
-	return
+-- Проверяет является ли текст окрашенным
+function isColored(text)
+for pos, i in pairs(stringToArray(text)) do
+if (i ~= "&") then
+if (i ~= " ") then
+return false
+end
 else
-	hologram = component.get("hologram")
+return true
+end
 end
 
------------------------------------------------------------
-
-local workspace, window = system.addWindow(GUI.filledWindow(1, 1, 36, 18, 0x2D2D2D))
-
-local layout = window:addChild(GUI.layout(1, 1, window.width, window.height, 1, 1))
-
-local picture = layout:addChild(GUI.image(1, 1, image.load(filesystem.path(system.getCurrentScript()) .. "Icon.pic")))
-picture.height = picture.height + 1
-
-local function addSlider(min, max, value, ...)
-	return layout:addChild(GUI.slider(1, 1, layout.width - 10, 0x66DB80, 0x0, 0xE1E1E1, 0x969696, min, max, value, false, ...))
+return true
 end
 
-local speedSlider = addSlider(0.1, 1, 0.8, "Speed: ", "")
-local rotationSlider = addSlider(0, 100, 0, "Rotation: ", "")
-local translationSlider = addSlider(0, 1, select(2, hologram.getTranslation()), "Translation: ", "")
-local scaleSlider = addSlider(0.33, 3, hologram.getScale(), "Scale: ", "")
-scaleSlider.height = 2
-
-scaleSlider.onValueChanged = function()
-	hologram.setScale(scaleSlider.value)
+-- Проверяет в глобальном ли чате написано сообщение
+function isGlobal(text)
+for pos, i in pairs(stringToArray(text)) do
+if (i ~= "!") then
+if (i ~= " ") then
+return false
+end
+else
+return true, pos
+end
+end
+return false
 end
 
-rotationSlider.onValueChanged = function()
-	hologram.setRotationSpeed(rotationSlider.value, 0, 23, 0)
+-- Делит строку на части
+function split(str, pat)
+local t = {}
+local fpat = "(.-)" .. pat
+local last_end = 1
+local s, e, cap = str:find(fpat, 1)
+while s do
+if s ~= 1 or cap ~= "" then
+table.insert(t,cap)
+end
+last_end = e+1
+s, e, cap = str:find(fpat, last_end)
+end
+if last_end cap = str:sub(last_end)
+table.insert(t, cap)
+end
+return t
 end
 
-translationSlider.onValueChanged = function()
-	hologram.setTranslation(0, translationSlider.value, 0)
+-- Устанавливает цвет шрифта в зависимости от патерна
+function setColor(num)
+if (num == "0") then
+gpu.setForeground(0x333333)
 end
 
-window.onResize = function(width, height)
-	window.backgroundPanel.width = width
-	window.backgroundPanel.height = height
-
-	layout.width = width
-	layout.height = height
+if (num == "1") then
+gpu.setForeground(0x000099)
 end
 
--- Главный йоба-цикл
-local deadline = 0
-layout.eventHandler = function(workspace, panel, e1)
-	if computer.uptime() > deadline then
-		-- генерируем снежинку
-		local x, y, z, pixel = math.random(1, 46), 32, math.random(1, 46)
-		table.insert(tSnow, {x = x, y = y, z = z})
-		hologram.set(x, y, z, 1)
-
-		-- сдвигаем снежинки вниз
-		local i = 1
-		while i <= #tSnow do
-			if tSnow[i].y > 1 then
-				x, y, z = tSnow[i].x + math.random(-1, 1), tSnow[i].y - 1, tSnow[i].z + math.random(-1, 1)
-				
-				if x < 1 then
-					x = 1
-				elseif x > 46 then
-					x = 46
-				end
-
-				if z < 1 then
-					z = 1
-				elseif z > 46 then
-					z = 46
-				end
-				
-				pixel = hologram.get(x, y, z)
-				
-				if pixel == 0 or pixel == 1 then
-					hologram.set(tSnow[i].x, tSnow[i].y, tSnow[i].z, 0)
-					hologram.set(x, y, z, 1)
-					
-					tSnow[i].x, tSnow[i].y, tSnow[i].z = x, y, z
-					i = i + 1
-				else
-					table.remove(tSnow,i)
-				end
-			else
-				table.remove(tSnow,i)
-			end
-		end
-
-		deadline = computer.uptime() + 1 - speedSlider.value
-	end
+if (num == "2") then
+gpu.setForeground(0x006600)
 end
 
------------------------------------------------------------
-
--- Сначала интерфейс
-workspace:draw()
-
--- очищаем прожектор
-hologram.clear()
-scaleSlider.onValueChanged()
-rotationSlider.onValueChanged()
-
--- создаем палитру цветов
-hologram.setPaletteColor(1, 0xFFFFFF) -- снег
-hologram.setPaletteColor(2, 0x221100) -- ствол
-hologram.setPaletteColor(3, 0x005522) -- хвоя
-
- -- задействуем алгоритм Брезенхэма для рисования кругов
-local function cricle(x0, y, z0, R, i)
-	local x = R
-	local z = 0
-	local err = -R
-	while z <= x do
-		hologram.set(x + x0, y, z + z0, i)
-		hologram.set(z + x0, y, x + z0, i)
-		hologram.set(-x + x0, y, z + z0, i)
-		hologram.set(-z + x0, y, x + z0, i)
-		hologram.set(-x + x0, y, -z + z0, i)
-		hologram.set(-z + x0, y, -x + z0, i)
-		hologram.set(x + x0, y, -z + z0, i)
-		hologram.set(z + x0, y, -x + z0, i)
-		z = z + 1
-		if err <= 0 then
-			err = err + (2 * z + 1)
-		else
-			x = x - 1
-			err = err + (2 * (z - x) + 1)
-		end
-	end
+if (num == "3") then
+gpu.setForeground(0x006666)
 end
 
- -- отрисовываем основание ствола
-for i = 1, 5 do
-	cricle(23, i, 23, tSpruce[i], 2)
-	cricle(23, i, 23, tSpruce[i]-1, 2)
+if (num == "4") then
+gpu.setForeground(0x660000)
 end
 
--- отрисовываем хвою
-for j = 5, #tSpruce do
-	cricle(23, j, 23, tSpruce[j]-1, 3)
-	cricle(23, j, 23, tSpruce[j]-2, 3)
+if (num == "5") then
+gpu.setForeground(0x660066)
+end
+
+if (num == "6") then
+gpu.setForeground(0xFF8000)
+end
+
+if (num == "7") then
+gpu.setForeground(0xA0A0A0)
+end
+
+if (num == "8") then
+gpu.setForeground(0x404040)
+end
+
+if (num == "9") then
+gpu.setForeground(0x3399FF)
+end
+
+if (num == "a") then
+gpu.setForeground(0x99FF33)
+end
+
+if (num == "b") then
+gpu.setForeground(0x00FFFF)
+end
+
+if (num == "c") then
+gpu.setForeground(0xFF3333)
+end
+
+if (num == "d") then
+gpu.setForeground(0xFF00FF)
+end
+
+if (num == "e") then
+gpu.setForeground(0xFFFF00)
+end
+
+if (num == "f") then
+gpu.setForeground(0xFFFFFF)
+end
+end
+
+-- Выводит сообщение
+function writeMessage(text)
+local t = split(text, "&")
+for pos, i in pairs(t) do
+if (pos == 1 and not isColored(text)) then
+io.write(i)
+else
+setColor(string.sub(i, 1, 1))
+io.write(string.sub(i, 2))
+end
+end
+end
+
+-- Выводит остальную часть сообщения
+function message(nick, msg, isGlobal, pos)
+local type = ""
+if (isGlobal) then msg = string.sub(msg, pos + 1) type = "G" else type = "L" end
+
+local file = fs.open(LOG_PATH, "a")
+file:write("[" .. real_time() .. "] [" .. type .. "] " .. nick .. ": " .. msg .. "\n")
+file:close()
+
+gpu.setForeground(0x00FFFF)
+io.write("[" .. real_time() .. "] ")
+gpu.setForeground(0xFFFFFF)
+if (type == "G") then
+gpu.setForeground(0xFF9933)
+else
+gpu.setForeground(0xFFFFFF)
+end
+io.write("[" .. type .. "] ")
+gpu.setForeground(0x00FF00)
+io.write(nick)
+gpu.setForeground(0xFFFFFF)
+io.write(": ")
+writeMessage(msg, l)
+io.write("\n")
+end
+
+print("Инициализация...")
+os.sleep(1)
+print("Ожидание первого сообщения...")
+
+local _, add, nick, msg = event.pull("chat_message")
+term.clear()
+local type, pos = isGlobal(msg)
+message(nick, msg, type, pos)
+
+
+while true do
+
+local _, add, nick, msg = event.pull("chat_message")
+local type, pos = isGlobal(msg)
+message(nick, msg, type, pos)
+
 end
